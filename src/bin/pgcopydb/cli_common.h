@@ -94,6 +94,7 @@ typedef struct CopyDBOptions
 	uint64_t endpos;
 
 	char filterFileName[MAXPGPATH];
+	SourceFilters filters;
 	char requirementsFileName[MAXPGPATH];
 } CopyDBOptions;
 

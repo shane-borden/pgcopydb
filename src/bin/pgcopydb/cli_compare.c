@@ -28,6 +28,40 @@ static void cli_compare_schema(int argc, char **argv);
 static void cli_compare_data(int argc, char **argv);
 
 static bool cli_compare_data_table_hook(void *ctx, SourceTable *table);
+static int get_max_table_name_width(DatabaseCatalog *sourceDB);
+
+typedef struct MaxWidthContext
+{
+	int maxWidth;
+} MaxWidthContext;
+
+static bool
+get_max_width_hook(void *ctx, SourceTable *table)
+{
+	MaxWidthContext *context = (MaxWidthContext *) ctx;
+	int len = strlen(table->qname);
+
+	if (len > context->maxWidth)
+	{
+		context->maxWidth = len;
+	}
+
+	return true;
+}
+
+static int
+get_max_table_name_width(DatabaseCatalog *sourceDB)
+{
+	MaxWidthContext context = { 0 };
+
+	if (!catalog_iter_s_table(sourceDB, &context, &get_max_width_hook))
+	{
+		log_error("Failed to get max table name width, see above for details");
+		return 30; /* fallback to default */
+	}
+
+	return context.maxWidth;
+}
 
 static CommandLine compare_schema_command =
 	make_command(
@@ -48,6 +82,8 @@ static CommandLine compare_data_command =
 		"  --source         Postgres URI to the source database\n"
 		"  --target         Postgres URI to the target database\n"
 		"  --dir            Work directory to use\n"
+		"  --restart        Fresh start, remove the work directory\n"
+		"  --filters        Path to a file containing filtering rules\n"
 		"  --json           Format the output using JSON\n",
 		cli_compare_getopts,
 		cli_compare_data);
@@ -86,6 +122,8 @@ cli_compare_getopts(int argc, char **argv)
 		{ "debug", no_argument, NULL, 'd' },
 		{ "trace", no_argument, NULL, 'z' },
 		{ "quiet", no_argument, NULL, 'q' },
+		{ "restart", no_argument, NULL, 'R' },
+		{ "filters", required_argument, NULL, 'f' },
 		{ "help", no_argument, NULL, 'h' },
 		{ NULL, 0, NULL, 0 }
 	};
@@ -103,7 +141,7 @@ cli_compare_getopts(int argc, char **argv)
 	SplitTableLargerThan empty = { 0 };
 	options.splitTablesLargerThan = empty;
 
-	while ((c = getopt_long(argc, argv, "S:T:D:j:JVvdzqh",
+	while ((c = getopt_long(argc, argv, "S:T:D:j:JVvdzqhRf:",
 							long_options, &option_index)) != -1)
 	{
 		switch (c)
@@ -220,10 +258,28 @@ cli_compare_getopts(int argc, char **argv)
 				break;
 			}
 
+			case 'R':
+			{
+				options.restart = true;
+				log_trace("--restart");
+				break;
+			}
+
 			case 'h':
 			{
 				commandline_help(stderr);
 				exit(EXIT_CODE_QUIT);
+				break;
+			}
+
+			case 'f':
+			{
+				if (!parse_filters(optarg, &(options.filters)))
+				{
+					log_fatal("Failed to parse --filters file: \"%s\"", optarg);
+					++errors;
+				}
+				log_trace("--filters %s", optarg);
 				break;
 			}
 
@@ -391,17 +447,37 @@ cli_compare_data(int argc, char **argv)
 	}
 	else
 	{
-		fformat(stdout, "%30s | %s | %36s | %36s \n",
-				"Table Name", "!", "Source Checksum", "Target Checksum");
+		int maxwidth = get_max_table_name_width(sourceDB);
+		char format[BUFSIZE];
 
-		fformat(stdout, "%30s-+-%s-+-%36s-+-%36s \n",
-				"------------------------------",
+		snprintf(format, BUFSIZE, "%%%ds | %%s | %%36s | %%36s \n", maxwidth);
+
+		fformat(stdout, format, "Table Name", "!", "Source Checksum", "Target Checksum");
+
+		char *dash = (char *) malloc(maxwidth + 1);
+
+		if (dash == NULL)
+		{
+			log_error(ALLOCATION_FAILED_ERROR);
+			exit(EXIT_CODE_INTERNAL_ERROR);
+		}
+
+		for (int i = 0; i < maxwidth; i++)
+		{
+			dash[i] = '-';
+		}
+		dash[maxwidth] = '\0';
+
+		fformat(stdout, "%s-+-%s-+-%36s-+-%36s \n",
+				dash,
 				"-",
 				"------------------------------------",
 				"------------------------------------");
 
+		free(dash);
+
 		if (!catalog_iter_s_table(sourceDB,
-								  NULL,
+								  &maxwidth,
 								  &cli_compare_data_table_hook))
 		{
 			log_error("Failed to compare tables, see above for details");
@@ -455,10 +531,15 @@ cli_compare_data_table_hook(void *ctx, SourceTable *table)
 	}
 	else
 	{
+		int *maxwidth = (int *) ctx;
+		char format[BUFSIZE];
+
+		snprintf(format, BUFSIZE, "%%%ds | %%s | %%36s | %%36s \n", *maxwidth);
+
 		TableChecksum *srcChk = &(table->sourceChecksum);
 		TableChecksum *dstChk = &(table->targetChecksum);
 
-		fformat(stdout, "%30s | %s | %36s | %36s \n",
+		fformat(stdout, format,
 				table->qname,
 				streq(srcChk->checksum, dstChk->checksum) ? " " : "!",
 				srcChk->checksum,

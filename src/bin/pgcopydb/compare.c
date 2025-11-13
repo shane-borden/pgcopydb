@@ -133,13 +133,21 @@ compare_data(CopyDataSpec *copySpecs)
 /*
  * compare_queue_tables adds table to our queue.
  */
+typedef struct CompareContext
+{
+	CopyDataSpec *copySpecs;
+	Queue *queue;
+} CompareContext;
+
 bool
 compare_queue_tables(CopyDataSpec *copySpecs, Queue *queue)
 {
 	DatabaseCatalog *sourceDB = &(copySpecs->catalogs.source);
 
+	CompareContext context = { .copySpecs = copySpecs, .queue = queue };
+
 	/* now append the table OIDs to the queue */
-	if (!catalog_iter_s_table(sourceDB, queue, &compare_queue_table_hook))
+	if (!catalog_iter_s_table(sourceDB, &context, &compare_queue_table_hook))
 	{
 		log_error("Failed to compare tables, see above for details");
 		return false;
@@ -169,12 +177,18 @@ compare_queue_tables(CopyDataSpec *copySpecs, Queue *queue)
 static bool
 compare_queue_table_hook(void *ctx, SourceTable *table)
 {
-	Queue *queue = (Queue *) ctx;
+	CompareContext *context = (CompareContext *) ctx;
+	Queue *queue = context->queue;
 
 	if (asked_to_stop || asked_to_stop_fast || asked_to_quit)
 	{
 		log_error("Compare data has been interrupted");
 		return false;
+	}
+
+	if (table->excludeData)
+	{
+		return true;
 	}
 
 	QMessage mesg = {

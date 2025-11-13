@@ -1,4 +1,13 @@
-### pgcopydb v0.17 (August 7, 2024) ###
+## pgcopydb 3.5.0 (unreleased)
+
+* Add `--filters` option to the `pgcopydb compare data` command.
+* Add `--split-tables-greater-than` option to the `pgcopydb copy table-data` command.
+* Add `--use-copy-binary` option to the `pgcopydb copy table-data` command.
+* Add `--split-max-parts` option to the `pgcopydb copy table-data` command.
+* Add `--restart` option to the `pgcopydb compare data` command.
+* Fixed the text alignment output for the `pgcopydb compare data` command to align with the longest table name.
+
+## pgcopydb 3.4.0 (2024-02-22)
 
 pgcopydb v0.17 is mostly a bugfix release. New features include
 compatibility and performance options such as disabling the COPY partition

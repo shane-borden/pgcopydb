@@ -542,7 +542,8 @@ copydb_init_specs(CopyDataSpec *specs,
 		.vacuumQueue = { NULL, -1 },
 		.indexQueue = { NULL, -1 },
 
-		.catalogs = { 0 }
+		.catalogs = { 0 },
+		.filters = options->filters
 	};
 
 	if (!IS_EMPTY_STRING_BUFFER(options->snapshot))
